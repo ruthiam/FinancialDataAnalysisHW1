@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Market Risk Monitoring - Phase 1</title>
+    <!-- Dependencies -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/simple-statistics/7.7.0/simple-statistics.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0f172a;
+            color: #f1f5f9;
+        }
+
+        .glass-card {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .plot-container {
+            height: 360px;
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+    </style>
+</head>
+
+<body class="min-h-screen">
+
+    <!-- Header Section -->
+    <header class="p-8 border-b border-slate-800 bg-slate-900/50 mb-8">
+        <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
+            <div>
+                <h1 class="text-3xl font-extrabold tracking-tight text-white flex items-center gap-2">
+                    <span class="text-indigo-500">🛡️</span> Market Risk Monitoring
+                </h1>
+                <p class="text-slate-400 text-sm mt-1">Phase 1: Exploratory Data Analysis & Risk Metrics</p>
+            </div>
+            <div class="flex flex-wrap gap-4 items-center">
+                <input type="file" id="csvFile" accept=".csv" class="hidden" />
+                <label for="csvFile"
+                    class="cursor-pointer bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2 px-6 rounded-lg transition-all shadow-lg shadow-indigo-500/20">
+                    Upload Dataset (CSV)
+                </label>
+                <div id="uploadStatus" class="text-sm text-slate-500 italic">No file selected</div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="p-8 max-w-7xl mx-auto space-y-8">
+
+        <!-- Dashboard Controls (Visible after upload) -->
+        <section id="controls"
+            class="hidden glass-card p-6 rounded-2xl grid grid-cols-1 md:grid-cols-4 gap-6 items-end">
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Asset
+                    Selection</label>
+                <select id="assetSelector"
+                    class="w-full bg-slate-800 border border-slate-700 p-2 rounded-lg text-white">
+                    <option value="All">All Assets</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Date Range</label>
+                <div class="flex gap-2">
+                    <input type="date" id="startDate"
+                        class="bg-slate-800 border border-slate-700 p-2 rounded-lg text-sm w-full" />
+                    <input type="date" id="endDate"
+                        class="bg-slate-800 border border-slate-700 p-2 rounded-lg text-sm w-full" />
+                </div>
+            </div>
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Rolling Window /
+                    Annualize</label>
+                <div class="flex items-center gap-4">
+                    <input type="number" id="rollWindow" value="20" min="5" max="252"
+                        class="bg-slate-800 border border-slate-700 p-2 rounded-lg text-white w-20" />
+                    <label class="flex items-center gap-2 text-sm cursor-pointer">
+                        <input type="checkbox" id="annualize" checked
+                            class="w-4 h-4 rounded border-slate-700 text-indigo-500" />
+                        Annualize Vol
+                    </label>
+                </div>
+            </div>
+            <div class="flex gap-2">
+                <button id="refreshBtn"
+                    class="flex-1 bg-slate-700 hover:bg-slate-600 p-2 rounded-lg font-bold transition-all">Update
+                    View</button>
+            </div>
+        </section>
+
+        <!-- Debug Banner -->
+        <div id="debugBanner"
+            class="hidden glass-card p-4 rounded-xl border-l-4 border-amber-500 text-[10px] font-mono text-amber-200">
+            <span class="font-bold uppercase mr-2">Debug Info:</span>
+            <span id="debugContent"></span>
+        </div>
+
+        <!-- View Sections -->
+        <div id="dashboardContent" class="hidden space-y-12">
+
+            <!-- Section 1: Data Quality -->
+            <section>
+                <h2 class="text-xl font-bold mb-6 border-l-4 border-indigo-500 pl-4">1. Data Quality & Overview</h2>
+                <div id="qualityStats" class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6"></div>
+                <div class="mt-8 glass-card rounded-2xl overflow-hidden">
+                    <div class="p-4 bg-slate-800/30 border-b border-slate-800">
+                        <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-widest">Data Sample (First 10
+                            rows)</h3>
+                    </div>
+                    <div class="overflow-x-auto" id="sampleTable"></div>
+                </div>
+            </section>
+
+            <!-- Section 2: Price & Returns -->
+            <section>
+                <h2 class="text-xl font-bold mb-6 border-l-4 border-indigo-500 pl-4">2. Price & Return Performance</h2>
+                <div class="grid grid-cols-1 xl:grid-cols-2 gap-8">
+                    <div class="glass-card p-6 rounded-2xl">
+                        <div id="pricePlot" class="plot-container"></div>
+                    </div>
+                    <div class="glass-card p-6 rounded-2xl">
+                        <div id="returnPlot" class="plot-container"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Section 3: Distribution -->
+            <section>
+                <h2 class="text-xl font-bold mb-6 border-l-4 border-indigo-500 pl-4">3. Return Distribution &
+                    Normalities</h2>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+                    <div class="lg:col-span-1 space-y-6">
+                        <div class="glass-card p-6 rounded-2xl overflow-hidden" id="summaryStatsTable"></div>
+                        <div class="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-200 text-sm">
+                            <strong>Note on Outliers:</strong> The outlier counts reflect returns with |z-score| > 3.
+                            These often represent real market shocks.
+                        </div>
+                    </div>
+                    <div class="lg:col-span-1 glass-card p-6 rounded-2xl">
+                        <div id="histPlot" class="plot-container"></div>
+                    </div>
+                    <div class="lg:col-span-1 glass-card p-6 rounded-2xl">
+                        <div id="qqPlot" class="plot-container"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Section 4: Rolling Risk -->
+            <section>
+                <h2 class="text-xl font-bold mb-6 border-l-4 border-indigo-500 pl-4">4. Rolling Risk Measures</h2>
+                <div class="grid grid-cols-1 xl:grid-cols-2 gap-8">
+                    <div class="glass-card p-6 rounded-2xl">
+                        <div id="rollingVolPlot" class="plot-container"></div>
+                    </div>
+                    <div class="glass-card p-6 rounded-2xl">
+                        <div id="rollingMeanPlot" class="plot-container"></div>
+                    </div>
+                </div>
+                <p class="mt-4 text-center text-slate-500 italic text-sm">
+                    "Rolling volatility is our baseline risk measure; later stages compare it with EWMA and GARCH."
+                </p>
+            </section>
+
+            <!-- Section 5: Cross-Asset -->
+            <section id="crossAssetSection">
+                <h2 class="text-xl font-bold mb-6 border-l-4 border-indigo-500 pl-4">5. Cross-Asset Relationships</h2>
+                <div class="grid grid-cols-1 xl:grid-cols-2 gap-8 items-start">
+                    <div class="glass-card p-6 rounded-2xl">
+                        <div id="heatmapPlot" class="plot-container"></div>
+                    </div>
+                    <div class="glass-card p-6 rounded-2xl space-y-6">
+                        <div class="flex items-center gap-4 justify-between">
+                            <h3 class="font-bold text-slate-300 uppercase text-xs tracking-widest">Rolling Correlation
+                                Pairs</h3>
+                            <div class="flex gap-2" id="pairSelector"></div>
+                        </div>
+                        <div id="rollCorrPlot" class="plot-container" style="min-height: 380px;"></div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Initial State (No data) -->
+        <div id="noDataView" class="py-24 text-center space-y-6">
+            <div class="text-6xl">📥</div>
+            <h2 class="text-2xl font-bold text-slate-300">Awaiting Market Data</h2>
+            <p class="text-slate-500 max-w-md mx-auto">Upload a CSV file in tidy format (Date, Asset, Price) to generate
+                the market risk report.</p>
+        </div>
+    </main>
+
+    <footer class="p-12 border-t border-slate-800 text-center text-slate-600 text-xs">
+        <p>&copy; 2026 Market Risk Monitoring Dashboard. Designed for Deepmind Agentic Coding Project.</p>
+    </footer>
+
+    <!-- Core Logic -->
+    <script>
+        // --- DATA STATE ---
+        let rawData = [];
+        let assetData = {}; // {AssetName: {dates, prices, returns, fullData}}
+        let globalDates = [];
+        const plotlyLayoutBase = {
+            paper_bgcolor: 'rgba(0,0,0,0)',
+            plot_bgcolor: 'rgba(0,0,0,0)',
+            font: { color: '#94a3b8', family: 'Inter, sans-serif' },
+            xaxis: { gridcolor: '#1e293b', zerolinecolor: '#334155' },
+            yaxis: { gridcolor: '#1e293b', zerolinecolor: '#334155' },
+            margin: { t: 40, b: 40, l: 60, r: 20 }
+        };
+
+        // --- ELEMENTS ---
+        const fileInput = document.getElementById('csvFile');
+        const uploadStatus = document.getElementById('uploadStatus');
+        const dashboardContent = document.getElementById('dashboardContent');
+        const noDataView = document.getElementById('noDataView');
+        const assetSelector = document.getElementById('assetSelector');
+        const startDateInput = document.getElementById('startDate');
+        const endDateInput = document.getElementById('endDate');
+        const rollWindowInput = document.getElementById('rollWindow');
+        const annualizeCheckbox = document.getElementById('annualize');
+        const refreshBtn = document.getElementById('refreshBtn');
+
+        // --- HANDLERS ---
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            uploadStatus.textContent = "Parsing " + file.name + "...";
+            Papa.parse(file, {
+                header: true,
+                dynamicTyping: true,
+                skipEmptyLines: true,
+                complete: (results) => handleParseComplete(results),
+                error: (err) => {
+                    alert("Error parsing CSV: " + err.message);
+                    uploadStatus.textContent = "Error";
+                }
+            });
+        });
+
+        refreshBtn.addEventListener('click', () => updateDashboard());
+
+        function handleParseComplete(results) {
+            const data = results.data;
+            if (!validateData(data)) return;
+
+            rawData = data;
+            processRawData(data);
+
+            // UI Switch
+            noDataView.classList.add('hidden');
+            dashboardContent.classList.remove('hidden');
+            document.getElementById('controls').classList.remove('hidden');
+            uploadStatus.textContent = "Data Loaded Successfully";
+
+            // Populate Selectors
+            assetSelector.innerHTML = '<option value="All">All Assets</option>';
+            Object.keys(assetData).forEach(name => {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                assetSelector.appendChild(opt);
+            });
+
+            // Set default dates (must be YYYY-MM-DD for <input type="date">)
+            const formatDate = (d) => d.toISOString().split('T')[0];
+            startDateInput.value = formatDate(globalDates[0]);
+            endDateInput.value = formatDate(globalDates[globalDates.length - 1]);
+
+            updateDashboard();
+        }
+
+        function validateData(data) {
+            if (data.length === 0) { alert("Empty CSV!"); return false; }
+            const cols = Object.keys(data[0]);
+            const required = ['Date', 'Asset', 'Price'];
+            const missing = required.filter(c => !cols.includes(c));
+            if (missing.length > 0) {
+                alert("Missing required columns: " + missing.join(', '));
+                return false;
+            }
+            return true;
+        }
+
+        function processRawData(data) {
+            assetData = {};
+
+            // 1) Robust Parsing & Validation
+            const parsed = data.filter(row => {
+                const d = new Date(row.Date);
+                const p = Number(row.Price);
+                return !isNaN(d.getTime()) && isFinite(p) && !!row.Asset;
+            }).map(row => {
+                const retRaw = row.Log_Return;
+                return {
+                    ...row,
+                    dateObj: new Date(row.Date),
+                    Price: Number(row.Price),
+                    Log_Return: (retRaw === "" || retRaw == null) ? NaN : Number(retRaw)
+                };
+            });
+
+            // 2) Group by Asset
+            parsed.forEach(row => {
+                if (!assetData[row.Asset]) assetData[row.Asset] = [];
+                assetData[row.Asset].push(row);
+            });
+
+            const uniqueDateStrings = [...new Set(parsed.map(r => r.Date))].sort();
+            globalDates = uniqueDateStrings.map(d => new Date(d));
+
+            // 3) Sort and Compute Returns per Asset
+            Object.keys(assetData).forEach(name => {
+                // EXPLICIT SORT BY DATE OBJECT (fixes diagonal lines)
+                assetData[name].sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
+
+                const prices = assetData[name].map(r => r.Price);
+                const dates = assetData[name].map(r => r.dateObj);
+                const csvReturns = assetData[name].map(r => r.Log_Return);
+                const returns = [];
+
+                for (let i = 0; i < prices.length; i++) {
+                    if (i === 0) {
+                        returns.push(null);
+                    } else {
+                        // Use CSV return if finite, else compute ln(Pt/Pt-1)
+                        if (Number.isFinite(csvReturns[i])) {
+                            returns.push(csvReturns[i]);
+                        } else {
+                            const prev = prices[i - 1];
+                            const curr = prices[i];
+                            if (prev > 0 && curr > 0) {
+                                returns.push(Math.log(curr / prev));
+                            } else {
+                                returns.push(0);
+                            }
+                        }
+                    }
+                }
+
+                assetData[name] = {
+                    dates: dates, // Array of Date objects
+                    prices: prices,
+                    returns: returns,
+                    full: assetData[name]
+                };
+
+                // UNIT STANDARDIZATION CHECK
+                const validRet = returns.filter(v => v !== null && Number.isFinite(v));
+                if (validRet.length > 0) {
+                    const sortedAbs = [...validRet].map(Math.abs).sort((a, b) => a - b);
+                    const med = ss.medianSorted(sortedAbs);
+                    const maxVal = sortedAbs[sortedAbs.length - 1];
+                    // If median daily return > 0.1 (10%) or max > 2 (200%), it's likely percent integers
+                    if (med > 0.1 || maxVal > 2) {
+                        console.log(`[Validation] ${name} returns detected as PERCENT. Converting to DECIMAL.`);
+                        for (let k = 0; k < returns.length; k++) {
+                            if (returns[k] !== null) returns[k] = returns[k] / 100;
+                        }
+                    }
+                }
+
+                console.log(`Verified Asset: ${name}`, {
+                    n: prices.length,
+                    minDate: dates[0].toISOString().split('T')[0],
+                    maxDate: dates[dates.length - 1].toISOString().split('T')[0],
+                    minPrice: Math.min(...prices),
+                    maxPrice: Math.max(...prices),
+                    minRet: Math.min(...returns.filter(v => v !== null)),
+                    maxRet: Math.max(...returns.filter(v => v !== null))
+                });
+            });
+        }
+
+        async function updateDashboard() {
+            const btn = document.getElementById('refreshBtn');
+            const originalText = btn.textContent;
+            btn.textContent = "Updating...";
+            btn.disabled = true;
+
+            try {
+                await new Promise(r => setTimeout(r, 100));
+
+                const mode = assetSelector.value;
+                const start = new Date(startDateInput.value);
+                const end = new Date(endDateInput.value);
+                const rollWin = parseInt(rollWindowInput.value) || 20;
+
+                const filtered = filterData(mode, start, end);
+
+                // Update Debug Banner
+                const debugBanner = document.getElementById('debugBanner');
+                const debugContent = document.getElementById('debugContent');
+                if (mode !== "All" && filtered[mode]) {
+                    const d = filtered[mode];
+                    const pMin = Math.min(...d.prices).toFixed(2);
+                    const pMax = Math.max(...d.prices).toFixed(2);
+                    const rMin = (Math.min(...d.returns) * 100).toFixed(2) + "%";
+                    const rMax = (Math.max(...d.returns) * 100).toFixed(2) + "%";
+                    debugContent.textContent = `${mode} | N=${d.prices.length} | Price: [${pMin}, ${pMax}] | Return: [${rMin}, ${rMax}]`;
+                    debugBanner.classList.remove('hidden');
+                } else {
+                    debugBanner.classList.add('hidden');
+                }
+
+                renderOverview(filtered);
+                renderPriceReturnPlots(filtered, mode);
+                renderDistribution(filtered, mode);
+                renderRollingRisk(filtered, mode, rollWin);
+
+                if (mode === "All") {
+                    document.getElementById('crossAssetSection').classList.remove('hidden');
+                    renderCrossAsset(filtered);
+                } else {
+                    document.getElementById('crossAssetSection').classList.add('hidden');
+                }
+            } finally {
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        // --- FILTERING ---
+        function filterData(asset, start, end) {
+            const results = {};
+            const names = asset === "All" ? Object.keys(assetData) : [asset];
+
+            names.forEach(name => {
+                const item = assetData[name];
+                const indices = [];
+                const startTime = start.getTime();
+                const endTime = end.getTime();
+
+                item.dates.forEach((d, i) => {
+                    const time = d.getTime();
+                    if (time >= startTime && time <= endTime) indices.push(i);
+                });
+
+                results[name] = {
+                    dates: indices.map(i => item.dates[i]),
+                    prices: indices.map(i => Number(item.prices[i])),
+                    returns: indices.map(i => item.returns[i]).filter(r => r !== null).map(Number),
+                    returnDates: indices.filter(i => item.returns[i] !== null).map(i => item.dates[i])
+                };
+            });
+            return results;
+        }
+
+        // --- RENDERERS ---
+
+        function renderOverview(data) {
+            const statsGrid = document.getElementById('qualityStats');
+            const sampleBox = document.getElementById('sampleTable');
+            statsGrid.innerHTML = '';
+
+            let totalRows = 0;
+            let totalMissing = 0;
+
+            Object.keys(data).forEach(name => {
+                const item = data[name];
+                totalRows += item.prices.length;
+
+                const missing = item.prices.filter(p => !Number.isFinite(p)).length;
+                totalMissing += missing;
+
+                const firstDate = item.dates[0] ? item.dates[0].toISOString().split('T')[0] : 'N/A';
+                const lastDate = item.dates[item.dates.length - 1] ? item.dates[item.dates.length - 1].toISOString().split('T')[0] : 'N/A';
+
+                const card = `
+                    <div class="glass-card p-4 rounded-xl border-t-4 border-indigo-500 shadow-sm">
+                        <h4 class="text-xs font-bold text-slate-400 uppercase">${name}</h4>
+                        <div class="text-xl font-black mt-1">${item.prices.length} <span class="text-xs font-normal">pts</span></div>
+                        <div class="text-[10px] text-slate-500 mt-2">${firstDate} to ${lastDate}</div>
+                    </div>
+                `;
+                statsGrid.insertAdjacentHTML('beforeend', card);
+            });
+
+            // Summary Info
+            const summaryCard = `
+                <div class="glass-card p-4 rounded-xl border-t-4 border-slate-500 shadow-sm">
+                    <h4 class="text-xs font-bold text-slate-400 uppercase">Total Data Size</h4>
+                    <div class="text-xl font-black mt-1">${totalRows}</div>
+                    <div class="text-[10px] text-slate-500 mt-2">Missing Values: ${totalMissing}</div>
+                </div>
+            `;
+            statsGrid.insertAdjacentHTML('afterbegin', summaryCard);
+
+            // Sample Table
+            const sampleRows = [];
+            const names = Object.keys(data);
+            for (let i = 0; i < Math.min(10, data[names[0]].dates.length); i++) {
+                const dateStr = data[names[0]].dates[i].toISOString().split('T')[0];
+                const row = `
+                    <tr class="border-b border-slate-800/50 hover:bg-slate-700/20 text-xs">
+                        <td class="p-3">${dateStr}</td>
+                        ${names.map(name => `<td class="p-3 text-slate-400">${data[name].prices[i].toFixed(2)}</td>`).join('')}
+                    </tr>
+                `;
+                sampleRows.push(row);
+            }
+
+            sampleBox.innerHTML = `
+                <table class="w-full text-left border-collapse">
+                    <thead class="bg-slate-800/50 text-[10px] font-bold text-slate-500 uppercase">
+                        <tr>
+                            <th class="p-3">Date</th>
+                            ${names.map(n => `<th class="p-3">${n}</th>`).join('')}
+                        </tr>
+                    </thead>
+                    <tbody>${sampleRows.join('')}</tbody>
+                </table>
+            `;
+        }
+
+        function renderPriceReturnPlots(data, mode) {
+            const assetNames = Object.keys(data);
+
+            // Prices
+            const priceTraces = assetNames.map(name => {
+                const prices = data[name].prices;
+                const norm = mode === "All" ? prices.map(p => p / (prices[0] || 1) * 100) : prices;
+                return {
+                    x: data[name].dates,
+                    y: norm,
+                    name: name,
+                    type: 'scatter',
+                    line: { width: 2 },
+                    connectgaps: false
+                };
+            });
+            Plotly.newPlot('pricePlot', priceTraces, {
+                ...plotlyLayoutBase,
+                title: mode === "All" ? 'Indexed Price (Base 100)' : `${mode} Price History`,
+                xaxis: { ...plotlyLayoutBase.xaxis, type: 'date', automargin: true },
+                yaxis: { title: mode === "All" ? 'Level' : 'Price ($)', ...plotlyLayoutBase.yaxis, type: 'linear', automargin: true }
+            }, { responsive: true, displayModeBar: false });
+
+            // Returns
+            const returnTraces = assetNames.map(name => ({
+                x: data[name].returnDates,
+                y: data[name].returns,
+                name: name,
+                type: 'scatter',
+                mode: 'lines',
+                line: { width: 1 }
+            }));
+            Plotly.newPlot('returnPlot', returnTraces, {
+                ...plotlyLayoutBase,
+                title: 'Daily Log Returns',
+                xaxis: { ...plotlyLayoutBase.xaxis, type: 'date', automargin: true },
+                yaxis: { title: 'Return', ...plotlyLayoutBase.yaxis, type: 'linear', tickformat: '.2f', automargin: true }
+            }, { responsive: true, displayModeBar: false });
+
+            setTimeout(() => {
+                Plotly.Plots.resize('pricePlot');
+                Plotly.Plots.resize('returnPlot');
+            }, 50);
+        }
+
+        function renderDistribution(data, mode) {
+            const statsBox = document.getElementById('summaryStatsTable');
+            const histDiv = document.getElementById('histPlot');
+            const qqDiv = document.getElementById('qqPlot');
+            statsBox.innerHTML = '';
+
+            const binSize = 0.0005;
+
+            if (mode === "All") {
+                const names = Object.keys(data);
+                let allReturns = [];
+                const traces = [];
+
+                names.forEach(name => {
+                    const r = data[name].returns.filter(Number.isFinite).map(Number);
+                    allReturns = allReturns.concat(r);
+                    if (r.length > 30) {
+                        traces.push({
+                            x: r, type: 'histogram', name: name, opacity: 0.5,
+                            histnorm: 'probability density',
+                            xbins: { start: -0.2, end: 0.2, size: binSize }
+                        });
+                    }
+                });
+
+                if (traces.length === 0) {
+                    histDiv.innerHTML = `<div class="p-6 text-slate-500 italic text-sm text-center">Select an asset for detailed metrics.</div>`;
+                } else {
+                    const sorted = [...allReturns].sort((a, b) => a - b);
+                    const p5 = ss.quantileSorted(sorted, 0.05);
+                    const p95 = ss.quantileSorted(sorted, 0.95);
+
+                    Plotly.newPlot(histDiv, traces, {
+                        ...plotlyLayoutBase, barmode: 'overlay', title: "Return Density Comparison",
+                        xaxis: { title: 'Daily log return (decimal)', range: [p5, p95], ...plotlyLayoutBase.xaxis, type: 'linear', automargin: true },
+                        yaxis: { title: 'Density', ...plotlyLayoutBase.yaxis, type: 'linear', automargin: true },
+                        shapes: [{ type: 'line', x0: 0, x1: 0, y0: 0, y1: 1, xref: 'x', yref: 'paper', line: { color: 'rgba(255,255,255,0.3)', width: 1, dash: 'dot' } }]
+                    }, { responsive: true, displayModeBar: false });
+
+                    statsBox.innerHTML = `
+                        <div class="text-slate-400 p-4">
+                            <div class="text-[10px] font-bold uppercase tracking-widest border-b border-slate-800 pb-1 mb-3">Verification Info</div>
+                            <div class="grid grid-cols-1 gap-2 text-xs">
+                                <div><span class="text-slate-500">Total Returns:</span> N = ${allReturns.length}</div>
+                                <div><span class="text-slate-500">Hist Range:</span> [${(p5 || 0).toFixed(4)}, ${(p95 || 0).toFixed(4)}]</div>
+                                <div><span class="text-slate-500">Bin Size:</span> ${binSize}</div>
+                            </div>
+                            <div class="text-indigo-400 pt-4 italic text-[10px] border-t border-slate-800/50 mt-2">Select single asset for detailed moments.</div>
+                        </div>
+                    `;
+                }
+                qqDiv.innerHTML = `<div class="p-6 text-slate-500 italic text-sm text-center h-full flex items-center justify-center border border-slate-800 rounded-xl">Select a single asset to view Q-Q plot.</div>`;
+                Plotly.purge(qqDiv);
+                return;
+            }
+
+            // Single Asset Mode
+            const cleanR = data[mode].returns.filter(Number.isFinite).map(Number);
+            qqDiv.innerHTML = ""; // Clear placeholder
+
+            if (cleanR.length < 30) {
+                histDiv.innerHTML = `<div class="p-6 text-amber-400 bg-amber-500/5 rounded-xl text-sm">⚠️ Insufficient data (N=${cleanR.length}).</div>`;
+                return;
+            }
+
+            const sorted = [...cleanR].sort((a, b) => a - b);
+            const mean = ss.mean(cleanR);
+            const std = ss.standardDeviation(cleanR);
+            const skew = ss.sampleSkewness(cleanR);
+            const kurt = ss.sampleKurtosis(cleanR);
+            const outliers = cleanR.filter(val => Math.abs((val - mean) / std) > 3).length;
+            const p5 = ss.quantileSorted(sorted, 0.05);
+            const p95 = ss.quantileSorted(sorted, 0.95);
+
+            statsBox.innerHTML = `
+                <div class="text-slate-400 p-4">
+                    <div class="mb-4 text-[10px] text-slate-500 uppercase tracking-widest font-bold border-b border-slate-800 pb-2">Verified Moments (N=${cleanR.length})</div>
+                    <table class="w-full text-xs mb-4">
+                        <tbody class="text-slate-300">
+                            <tr class="border-b border-slate-800/30"><td class="py-2">Mean</td><td class="text-right text-indigo-300 font-mono">${mean.toFixed(6)}</td></tr>
+                            <tr class="border-b border-slate-800/30"><td class="py-2">Std Dev</td><td class="text-right text-indigo-300 font-mono">${std.toFixed(5)}</td></tr>
+                            <tr class="border-b border-slate-800/30"><td class="py-2">Skewness</td><td class="text-right font-mono">${skew.toFixed(3)}</td></tr>
+                            <tr class="border-b border-slate-800/30"><td class="py-2">Kurtosis</td><td class="text-right font-mono">${kurt.toFixed(3)}</td></tr>
+                            <tr class="text-amber-400 font-bold"><td class="pt-4 py-2 uppercase text-[10px]">Outliers (>3σ)</td><td class="pt-4 text-right">${outliers}</td></tr>
+                        </tbody>
+                    </table>
+                    <div class="mt-4 p-3 rounded bg-slate-800/20 text-[10px] text-slate-500 space-y-1 border border-slate-800/30">
+                        <div class="font-bold mb-1 uppercase tracking-tighter border-b border-slate-800/50 pb-1">Verification Info</div>
+                        <div>Returns used: N = ${cleanR.length}</div>
+                        <div>Histogram range: [${p5.toFixed(4)}, ${p95.toFixed(4)}]</div>
+                        <div>Bin size: ${binSize}</div>
+                    </div>
+                </div>
+            `;
+
+            Plotly.newPlot(histDiv, [{
+                x: cleanR, type: "histogram",
+                histnorm: 'probability density',
+                opacity: 0.8,
+                marker: { color: 'rgba(99, 102, 241, 0.7)', line: { color: '#6366f1', width: 0.5 } },
+                xbins: { start: -0.2, end: 0.2, size: binSize }
+            }], {
+                ...plotlyLayoutBase, title: `${mode} Distribution`,
+                xaxis: { title: 'Daily log return (decimal)', range: [p5, p95], ...plotlyLayoutBase.xaxis, type: 'linear', automargin: true },
+                yaxis: { title: 'Density', ...plotlyLayoutBase.yaxis, type: 'linear', automargin: true },
+                shapes: [{ type: 'line', x0: 0, x1: 0, y0: 0, y1: 1, xref: 'x', yref: 'paper', line: { color: 'rgba(255,255,255,0.4)', width: 1, dash: 'dot' } }]
+            }, { responsive: true, displayModeBar: false });
+
+            // 2. Normal Q-Q Plot Implementation
+            const standardized = sorted.map(v => (v - mean) / std);
+            const n = standardized.length;
+            const theoretical = standardized.map((_, i) => ss.probit((i + 0.5) / n));
+
+            Plotly.newPlot(qqDiv, [
+                {
+                    x: theoretical,
+                    y: standardized,
+                    mode: 'markers',
+                    type: 'scatter',
+                    name: 'Observed',
+                    marker: { color: '#6366f1', size: 3, opacity: 0.5 }
+                },
+                {
+                    x: [-4, 4],
+                    y: [-4, 4],
+                    mode: 'lines',
+                    type: 'scatter',
+                    name: 'Normal',
+                    line: { color: 'rgba(255,255,255,0.2)', width: 1, dash: 'dot' }
+                }
+            ], {
+                ...plotlyLayoutBase,
+                title: 'Normal Q-Q Plot',
+                xaxis: { title: 'Theoretical Quantiles', range: [-4, 4], ...plotlyLayoutBase.xaxis, type: 'linear', automargin: true },
+                yaxis: { title: 'Standardized Returns', range: [-4, 4], ...plotlyLayoutBase.yaxis, type: 'linear', automargin: true },
+                showlegend: false
+            }, { responsive: true, displayModeBar: false });
+
+            setTimeout(() => {
+                Plotly.Plots.resize(histDiv);
+                Plotly.Plots.resize(qqDiv);
+            }, 50);
+        }
+
+        function renderRollingRisk(data, mode, window) {
+            const assetNames = mode === "All" ? Object.keys(data) : [mode];
+            const volTraces = [];
+            const meanTraces = [];
+            const ann = annualizeCheckbox.checked ? Math.sqrt(252) : 1;
+
+            assetNames.forEach(name => {
+                const returns = data[name].returns;
+                const dates = data[name].returnDates;
+                const rollVol = [];
+                const rollMean = [];
+                const upper = [];
+                const lower = [];
+
+                if (returns.length >= window) {
+                    for (let i = 0; i < returns.length; i++) {
+                        if (i < window - 1) {
+                            rollVol.push(null); rollMean.push(null); upper.push(null); lower.push(null);
+                        } else {
+                            const slice = returns.slice(i - window + 1, i + 1);
+                            const m = ss.mean(slice);
+                            const s = ss.standardDeviation(slice);
+                            rollMean.push(m);
+                            rollVol.push(s * ann);
+                            upper.push(m + 2 * s);
+                            lower.push(m - 2 * s);
+                        }
+                    }
+
+                    volTraces.push({
+                        x: dates, y: rollVol.map(v => v === null ? null : Number(v)),
+                        name: name, mode: 'lines', line: { width: 2 }
+                    });
+
+                    if (mode !== "All") {
+                        meanTraces.push({ x: dates, y: rollMean, name: 'Mean', line: { color: '#f1f5f9', width: 2 } });
+                        meanTraces.push({ x: dates, y: upper, name: '+2σ', line: { color: 'rgba(99, 102, 241, 0.4)', dash: 'dot', width: 1 } });
+                        meanTraces.push({ x: dates, y: lower, name: '-2σ', line: { color: 'rgba(99, 102, 241, 0.4)', dash: 'dot', width: 1 }, fill: 'tonexty', fillcolor: 'rgba(99, 102, 241, 0.05)' });
+                    } else {
+                        meanTraces.push({ x: dates, y: rollMean, name: name, mode: 'lines', line: { width: 1.5 } });
+                    }
+                }
+            });
+
+            if (volTraces.length === 0) {
+                const msg = `<div class="p-6 text-slate-500 italic text-sm text-center">No assets with sufficient data.</div>`;
+                document.getElementById('rollingVolPlot').innerHTML = msg;
+                document.getElementById('rollingMeanPlot').innerHTML = msg;
+                return;
+            }
+
+            Plotly.newPlot('rollingVolPlot', volTraces, {
+                ...plotlyLayoutBase,
+                title: `Rolling Volatility(${window} - Day)`,
+                xaxis: { ...plotlyLayoutBase.xaxis, type: 'date', automargin: true },
+                yaxis: { title: ann > 1 ? 'Annualized Vol' : 'Daily Vol', ...plotlyLayoutBase.yaxis, type: 'linear', automargin: true }
+            }, { responsive: true, displayModeBar: false });
+
+            Plotly.newPlot('rollingMeanPlot', meanTraces, {
+                ...plotlyLayoutBase,
+                title: mode === "All" ? `Rolling Means (${window}-Day Comparison)` : `Rolling Mean (±2σ)`,
+                showlegend: mode === "All",
+                xaxis: { ...plotlyLayoutBase.xaxis, type: 'date', automargin: true },
+                yaxis: { ...plotlyLayoutBase.yaxis, type: 'linear', automargin: true }
+            }, { responsive: true, displayModeBar: false });
+
+            setTimeout(() => {
+                Plotly.Plots.resize('rollingVolPlot');
+                Plotly.Plots.resize('rollingMeanPlot');
+            }, 50);
+        }
+
+        function renderCrossAsset(data) {
+            const names = Object.keys(data);
+            if (names.length < 2) return;
+
+            // Efficiently align dates across all assets
+            const dateSets = names.map(n => new Set(data[n].returnDates.map(d => d.getTime())));
+            const overlapDates = data[names[0]].returnDates.filter(d =>
+                dateSets.every(set => set.has(d.getTime()))
+            );
+
+            if (overlapDates.length < 5) {
+                document.getElementById('heatmapPlot').innerHTML = `<div class="p-6 text-slate-500 italic text-center">Insufficient overlapping dates for correlation analysis.</div>`;
+                return;
+            }
+
+            const matrix = [];
+            // Pre-calculate date-to-return mappings for O(1) lookup
+            const returnMaps = {};
+            names.forEach(name => {
+                const map = new Map();
+                data[name].returnDates.forEach((d, i) => map.set(d.getTime(), data[name].returns[i]));
+                returnMaps[name] = map;
+            });
+
+            names.forEach(n1 => {
+                const row = [];
+                names.forEach(n2 => {
+                    const r1 = overlapDates.map(d => returnMaps[n1].get(d.getTime()));
+                    const r2 = overlapDates.map(d => returnMaps[n2].get(d.getTime()));
+                    row.push(ss.sampleCorrelation(r1, r2));
+                });
+                matrix.push(row);
+            });
+
+            Plotly.newPlot('heatmapPlot', [{
+                z: matrix, x: names, y: names,
+                type: 'heatmap', colorscale: 'RdBu', reversescale: true,
+                zmin: -0.5, zmax: 1.0,
+                text: matrix.map(r => r.map(v => v.toFixed(2))),
+                texttemplate: "%{text}", showscale: true
+            }], {
+                ...plotlyLayoutBase,
+                xaxis: { ...plotlyLayoutBase.xaxis, tickangle: -45, automargin: true },
+                yaxis: { ...plotlyLayoutBase.yaxis, automargin: true },
+                title: `Returns Correlation (N=${overlapDates.length})`
+            }, { responsive: true, displayModeBar: false });
+
+            // Rolling Correlation
+            const pairSelector = document.getElementById('pairSelector');
+            pairSelector.innerHTML = '';
+            const pairs = [];
+            for (let i = 0; i < names.length; i++) {
+                for (let j = i + 1; j < names.length; j++) pairs.push([names[i], names[j]]);
+            }
+
+            pairs.forEach((p, idx) => {
+                const btn = document.createElement('button');
+                btn.className = "text-[10px] bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded border border-slate-700 font-bold " + (idx === 0 ? "border-indigo-500 text-indigo-400" : "");
+                btn.textContent = `${p[0]}-${p[1]}`;
+                btn.onclick = () => {
+                    Array.from(pairSelector.children).forEach(c => c.classList.remove('border-indigo-500', 'text-indigo-400'));
+                    btn.classList.add('border-indigo-500', 'text-indigo-400');
+                    renderRollingCorr(data, p[0], p[1], overlapDates);
+                };
+                pairSelector.appendChild(btn);
+            });
+
+            if (pairs.length > 0) renderRollingCorr(data, pairs[0][0], pairs[0][1], overlapDates);
+            setTimeout(() => Plotly.Plots.resize('heatmapPlot'), 50);
+        }
+
+        function renderRollingCorr(data, n1, n2, dates) {
+            const win = 60;
+            const getTime = d => d.getTime();
+
+            const returnMap1 = new Map();
+            data[n1].returnDates.forEach((d, i) => returnMap1.set(d.getTime(), data[n1].returns[i]));
+            const returnMap2 = new Map();
+            data[n2].returnDates.forEach((d, i) => returnMap2.set(d.getTime(), data[n2].returns[i]));
+
+            const r1 = dates.map(d => returnMap1.get(d.getTime()));
+            const r2 = dates.map(d => returnMap2.get(d.getTime()));
+
+            const rollCorr = [];
+            for (let i = 0; i < r1.length; i++) {
+                if (i < win - 1) {
+                    rollCorr.push(null);
+                } else {
+                    const s1 = r1.slice(i - win + 1, i + 1);
+                    const s2 = r2.slice(i - win + 1, i + 1);
+                    rollCorr.push(ss.sampleCorrelation(s1, s2));
+                }
+            }
+
+            const dateObjs = dates;
+            Plotly.newPlot('rollCorrPlot', [{
+                x: dateObjs,
+                y: rollCorr.map(v => v === null ? null : Number(v)),
+                mode: 'lines',
+                line: { color: '#6366f1', width: 2 }
+            }], {
+                ...plotlyLayoutBase,
+                title: `${win}-Day Rolling Correlation`,
+                xaxis: { ...plotlyLayoutBase.xaxis, type: 'date', automargin: true },
+                yaxis: { range: [-1, 1], ...plotlyLayoutBase.yaxis, type: 'linear', automargin: true }
+            }, { responsive: true, displayModeBar: false });
+
+            setTimeout(() => Plotly.Plots.resize('rollCorrPlot'), 50);
+        }
+    </script>
+</body>
+
+</html>
